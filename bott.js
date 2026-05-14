@@ -42,7 +42,7 @@ async function startBot() {
 
     if (!sock.authState.creds.registered) {
 
-      const numero = "5511999999999"
+      const numero = "244942147501"
       // troque pelo seu número
       // sem + sem espaço
 
