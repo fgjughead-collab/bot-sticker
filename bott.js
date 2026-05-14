@@ -1,10 +1,5 @@
-process.on('uncaughtException', (err) => {
-console.log('UNCAUGHT EXCEPTION:', err)
-})
-
-process.on('unhandledRejection', (err) => {
-console.log('UNHANDLED REJECTION:', err)
-})
+process.on('uncaughtException', console.log)
+process.on('unhandledRejection', console.log)
 
 const {
 default: makeWASocket,
@@ -14,185 +9,153 @@ DisconnectReason
 } = require('@whiskeysockets/baileys')
 
 const pino = require('pino')
+const fs = require('fs')
 
 const config = require('./config')
-
+const db = require('./lib/db')
 const user = require('./lib/user')
-const middleware = require('./lib/middleware')
-const loadCommands = require('./lib/loader')
-const detect = require('./lib/detect')
 
-const commands = loadCommands()
+/* ================= BOT START ================= */
 
 async function startBot() {
 
-const { state, saveCreds } =
-await useMultiFileAuthState('./auth')
-
-const { version } =
-await fetchLatestBaileysVersion()
+const { state, saveCreds } = await useMultiFileAuthState('./auth')
+const { version } = await fetchLatestBaileysVersion()
 
 const sock = makeWASocket({
 version,
 auth: state,
 logger: pino({ level: 'silent' }),
-browser: ['TheBoys Bot', 'Chrome', '1.0.0']
+printQRInTerminal: true
 })
-
-/* =========================
-SALVAR SESSÃO
-========================= */
 
 sock.ev.on('creds.update', saveCreds)
 
-/* =========================
-CONEXÃO
-========================= */
+/* ================= CONNECTION ================= */
 
-let reconnecting = false
+sock.ev.on('connection.update', (update) => {
 
-sock.ev.on('connection.update', async (update) => {
-
-const {
-connection,
-lastDisconnect
-} = update
+const { connection, lastDisconnect } = update
 
 if (connection === 'open') {
-
-console.log('🔥 THEBOYS BOT ONLINE')
-
-reconnecting = false
+console.log('🔥 TheBoys Bot ONLINE')
 }
 
 if (connection === 'close') {
 
-const status =
-lastDisconnect?.error?.output?.statusCode
+const code = lastDisconnect?.error?.output?.statusCode
 
-console.log('❌ CONEXÃO FECHADA:', status)
+console.log('❌ Conexão fechou:', code)
 
-if (status === DisconnectReason.loggedOut) {
-
-console.log('❌ Sessão desconectada.')
-return
-}
-
-if (!reconnecting) {
-
-reconnecting = true
-
-console.log('🔄 Reconectando em 5 segundos...')
-
-setTimeout(() => {
-startBot()
-}, 5000)
-
+if (code !== DisconnectReason.loggedOut) {
+setTimeout(() => startBot(), 5000)
+} else {
+console.log('❌ Deslogado do WhatsApp')
 }
 
 }
 
 })
 
-/* =========================
-MENSAGENS
-========================= */
+/* ================= MESSAGES ================= */
 
 sock.ev.on('messages.upsert', async ({ messages }) => {
 
-try {
-
 const msg = messages[0]
-
 if (!msg.message) return
 
-if (msg.key.fromMe) return
-
 const from = msg.key.remoteJid
-
 const body =
 msg.message.conversation ||
 msg.message.extendedTextMessage?.text ||
 ''
 
-/* =========================
-USER ID
-========================= */
+/* garante user */
+db.getUser(from)
 
-const userId =
-msg.key.participant || msg.key.remoteJid
+/* ================= MENU ================= */
 
-/* =========================
-CRIAR USER
-========================= */
-
-user.createUser(userId)
-
-/* =========================
-AUTO DETECTAR LINKS
-========================= */
-
-const platform = detect(body)
-
-if (platform) {
-
-console.log(`📥 Link detectado: ${platform}`)
-
-}
-
-/* =========================
-PREFIX
-========================= */
-
-if (!body.startsWith(config.prefix)) return
-
-const args =
-body.slice(config.prefix.length).trim().split(/ +/)
-
-const cmd =
-args.shift().toLowerCase()
-
-/* =========================
-MIDDLEWARE
-========================= */
-
-const allowed =
-await middleware(sock, msg, cmd, userId)
-
-if (!allowed) return
-
-/* =========================
-COMANDO
-========================= */
-
-if (commands[cmd]) {
-
-await commands[cmd].execute(
-sock,
-msg,
-args
-)
-
-} else {
+if (body === '.menu') {
 
 await sock.sendMessage(from, {
-text: '❌ Comando não encontrado.'
+text: `
+╭━━🔥 THEBOYS BOT 🔥━━╮
+
+👤 PERFIL
+.perfil
+
+💰 ECONOMIA
+.gold
+.minerar
+
+🎮 GAMES
+.adivinha
+
+📥 DOWNLOADS (em breve)
+.mp3
+.mp4
+.tiktok
+
+╰━━━━━━━━━━━━━━╯
+`
 })
 
 }
 
-} catch (e) {
+/* ================= PERFIL ================= */
 
-console.log('MESSAGE ERROR:', e)
+if (body === '.perfil') {
+
+const u = db.getUser(from)
+
+await sock.sendMessage(from, {
+text: `
+👤 PERFIL
+
+💰 Gold: ${u?.gold || 0}
+⭐ XP: ${u?.xp || 0}
+📊 Level: ${u?.level || 1}
+`
+})
+
+}
+
+/* ================= MINERAR ================= */
+
+if (body === '.minerar') {
+
+const gain = Math.floor(Math.random() * 50) + 1
+
+db.addGold(from, gain)
+
+await sock.sendMessage(from, {
+text: `⛏ Você minerou +${gain} gold!`
+})
+
+}
+
+/* ================= ADIVINHA ================= */
+
+if (body.startsWith('.adivinha')) {
+
+const num = Math.floor(Math.random() * 5) + 1
+const guess = body.split(' ')[1]
+
+if (!guess) {
+return sock.sendMessage(from, { text: 'Digite um número de 1 a 5' })
+}
+
+if (parseInt(guess) === num) {
+db.addGold(from, 100)
+return sock.sendMessage(from, { text: '🎉 Acertou! +100 gold' })
+} else {
+return sock.sendMessage(from, { text: `❌ Errou! era ${num}` })
+}
 
 }
 
 })
 
 }
-
-/* =========================
-INICIAR BOT
-========================= */
 
 startBot()
