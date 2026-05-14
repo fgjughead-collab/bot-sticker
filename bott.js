@@ -9,12 +9,10 @@ downloadContentFromMessage
 const pino = require('pino')
 const fs = require('fs')
 const { exec } = require('child_process')
-const QRCode = require('qrcode-terminal')
 
 async function startBot() {
 
 const { state, saveCreds } = await useMultiFileAuthState('./auth')
-
 const { version } = await fetchLatestBaileysVersion()
 
 const sock = makeWASocket({
@@ -28,12 +26,7 @@ sock.ev.on('creds.update', saveCreds)
 
 sock.ev.on('connection.update', (update) => {
 
-const { connection, qr, lastDisconnect } = update
-
-if (qr) {
-console.log('\n📱 ESCANEIA O QR:\n')
-QRCode.generate(qr, { small: true })
-}
+const { connection, lastDisconnect } = update
 
 if (connection === 'open') {
 console.log('✅ CONECTADO COM SUCESSO')
@@ -50,8 +43,10 @@ if (statusCode !== DisconnectReason.loggedOut) {
 
 setTimeout(() => {
 startBot()
-}, 15000)
+}, 5000)
 
+} else {
+console.log('❌ Deslogado do WhatsApp. Precisa reconectar manualmente.')
 }
 
 }
@@ -61,7 +56,6 @@ startBot()
 sock.ev.on('messages.upsert', async ({ messages }) => {
 
 const msg = messages[0]
-
 if (!msg.message) return
 
 const from = msg.key.remoteJid
@@ -71,6 +65,7 @@ msg.message.conversation ||
 msg.message.extendedTextMessage?.text ||
 ''
 
+/* MENU */
 if (body === '.menu') {
 
 await sock.sendMessage(from, {
@@ -82,54 +77,44 @@ text:
 
 }
 
+/* STICKER */
 if (body === '.s') {
 
 await sock.sendMessage(from, {
-text: `🫡🤌🏾 O teu pedido está sendo processado...`
+text: '🫡🤌🏾 Processando sticker...'
 })
 
 let media = null
 let mediaType = null
 
 if (msg.message.imageMessage) {
-
 media = msg.message.imageMessage
 mediaType = 'image'
-
 }
 
 else if (msg.message.videoMessage) {
 
-const seconds =
-msg.message.videoMessage.seconds || 0
+const seconds = msg.message.videoMessage.seconds || 0
 
 if (seconds > 15) {
-
 return sock.sendMessage(from, {
 text: '❌ O vídeo deve ter no máximo 15 segundos.'
 })
-
 }
 
 media = msg.message.videoMessage
 mediaType = 'video'
-
 }
 
-else if (
-msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage
-) {
+else if (msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage) {
 
 media =
 msg.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage
 
 mediaType = 'image'
-
 }
 
-else if (
-msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.videoMessage
-) {
+else if (msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.videoMessage) {
 
 const quotedVideo =
 msg.message.extendedTextMessage.contextInfo.quotedMessage.videoMessage
@@ -137,38 +122,29 @@ msg.message.extendedTextMessage.contextInfo.quotedMessage.videoMessage
 const seconds = quotedVideo.seconds || 0
 
 if (seconds > 15) {
-
 return sock.sendMessage(from, {
 text: '❌ O vídeo deve ter no máximo 15 segundos.'
 })
-
 }
 
 media = quotedVideo
 mediaType = 'video'
-
 }
 
 if (!media) {
-
 return sock.sendMessage(from, {
 text: '❌ Envie ou responda uma imagem/vídeo com .s'
 })
-
 }
 
 let stream
 
 try {
-
 stream = await downloadContentFromMessage(media, mediaType)
-
-} catch {
-
+} catch (e) {
 return sock.sendMessage(from, {
-text: '❌ Não consegui baixar a mídia. Envie novamente.'
+text: '❌ Erro ao baixar mídia.'
 })
-
 }
 
 let buffer = Buffer.from([])
@@ -192,17 +168,13 @@ mediaType === 'image'
 exec(command, async (err) => {
 
 if (err) {
-
 console.log(err)
-
 return sock.sendMessage(from, {
 text: '❌ Erro ao criar sticker.'
 })
-
 }
 
-const sticker =
-fs.readFileSync('./output.webp')
+const sticker = fs.readFileSync('./output.webp')
 
 await sock.sendMessage(from, {
 sticker
@@ -212,8 +184,6 @@ fs.unlinkSync(inputFile)
 fs.unlinkSync('./output.webp')
 
 })
-
-}
 
 })
 
