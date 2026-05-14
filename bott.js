@@ -1,82 +1,44 @@
-import makeWASocket, {
-  DisconnectReason,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion
-} from "@whiskeysockets/baileys"
+import makeWASocket, { useMultiFileAuthState } from '@whiskeysockets/baileys'
+import pino from 'pino'
 
-import pino from "pino"
-import express from "express"
-
-const app = express()
-const PORT = process.env.PORT || 8080
-
-app.get("/", (req, res) => {
-  res.send("Bot online")
-})
-
-app.listen(PORT, () => {
-  console.log(`🌐 Server rodando na porta ${PORT}`)
-})
-
-async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("./auth_info")
-
-  const { version } = await fetchLatestBaileysVersion()
+const startBot = async () => {
+  const { state, saveCreds } = await useMultiFileAuthState('./session')
 
   const sock = makeWASocket({
-    version,
-    logger: pino({ level: "silent" }),
     auth: state,
-    browser: ["Ubuntu", "Chrome", "20.0.04"]
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: false, // 🔴 desliga QR
   })
 
-  sock.ev.on("creds.update", saveCreds)
+  sock.ev.on('creds.update', saveCreds)
 
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update
+  sock.ev.on('connection.update', async (update) => {
+    const { connection } = update
 
-    if (qr) {
-      console.log("📌 Escaneie o QR Code no Railway logs")
-      console.log(qr)
+    if (connection === 'open') {
+      console.log('✅ Bot conectado!')
     }
 
-    if (connection === "open") {
-      console.log("✅ BOT CONECTADO COM SUCESSO")
-    }
-
-    if (connection === "close") {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
-
-      console.log("❌ conexão fechada")
-
-      if (shouldReconnect) {
-        console.log("🔄 reconectando...")
-        startBot()
-      }
+    if (connection === 'close') {
+      console.log('❌ conexão fechou, reiniciando...')
+      startBot()
     }
   })
 
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    const msg = messages[0]
+  // 🔥 ISSO AQUI GERA O CÓDIGO (SEM QR)
+  const phoneNumber = '5511999999999' // 👈 SEU NÚMERO (com DDI)
 
-    if (!msg.message) return
-
-    const from = msg.key.remoteJid
-
-    const text =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      ""
-
-    console.log("📩 Mensagem:", text)
-
-    if (text.toLowerCase() === "ping") {
-      await sock.sendMessage(from, {
-        text: "pong 🏓"
-      })
-    }
-  })
+  try {
+    const code = await sock.requestPairingCode(phoneNumber)
+    console.log(`
+╔══════════════════════╗
+   CÓDIGO WHATSAPP
+╚══════════════════════╝
+${code}
+`)
+  } catch (err) {
+    console.log('Erro pairing code:', err)
+  }
 }
 
 startBot()
