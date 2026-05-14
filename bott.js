@@ -1,155 +1,97 @@
-// ===================== IMPORTS =====================
-const express = require('express')
+const express = require("express")
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys")
+
+/* ================= EXPRESS SERVER ================= */
+
 const app = express()
+const PORT = process.env.PORT || 3000
 
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  DisconnectReason
-} = require('@whiskeysockets/baileys')
-
-const pino = require('pino')
-
-// libs locais
-const config = require('./config')
-const db = require('./lib/db')
-const user = require('./lib/user')
-
-// ===================== EXPRESS (RENDER FIX) =====================
-app.get('/', (req, res) => {
-  res.send('TheBoys Bot online 🚀')
+app.get("/", (req, res) => {
+  res.send("💓 bot alive")
 })
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log('🌐 Server rodando na porta', process.env.PORT || 3000)
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("🌐 Server rodando na porta", PORT)
 })
 
-// ===================== CONTROLADORES =====================
-let isReconnecting = false
+/* ================= BOT ================= */
 
-// ===================== BOT START =====================
 async function startBot() {
   try {
-    const { state, saveCreds } = await useMultiFileAuthState('./auth')
+    const { state, saveCreds } = await useMultiFileAuthState("./auth")
     const { version } = await fetchLatestBaileysVersion()
 
     const sock = makeWASocket({
       version,
       auth: state,
-      logger: pino({ level: 'silent' }),
-      printQRInTerminal: true,
-      browser: ['TheBoys Bot', 'Chrome', '1.0.0']
+      printQRInTerminal: true
     })
 
-    // salvar sessão
-    sock.ev.on('creds.update', saveCreds)
+    sock.ev.on("creds.update", saveCreds)
 
-    // conexão
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect } = update
 
-      if (connection === 'open') {
-        console.log('🚀 Bot ONLINE')
+      if (connection === "open") {
+        console.log("🚀 Bot iniciado com sucesso")
       }
 
-      if (connection === 'close') {
-        const statusCode = lastDisconnect?.error?.output?.statusCode
+      if (connection === "close") {
+        console.log("❌ Conexão fechou:", lastDisconnect?.error?.message)
 
-        console.log('❌ Conexão fechou:', statusCode)
-
-        // se logout real
-        if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-          console.log('🚫 Sessão expirada — precisa novo QR')
-          return
-        }
-
-        // evita loop infinito
-        if (isReconnecting) return
-        isReconnecting = true
-
-        console.log('🔁 Reconectando em 30s...')
-
+        console.log("🔁 Reconectando...")
         setTimeout(() => {
-          isReconnecting = false
           startBot()
-        }, 30000)
+        }, 5000)
       }
     })
 
-    // ===================== MENSAGENS =====================
-    sock.ev.on('messages.upsert', async ({ messages }) => {
+    sock.ev.on("messages.upsert", async ({ messages }) => {
       const msg = messages[0]
+
       if (!msg.message) return
 
-      const from = msg.key.remoteJid
-
-      const body =
+      const text =
         msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        ''
+        msg.message.extendedTextMessage?.text
 
-      // ================= MENU =================
-      if (body === '.menu') {
-        await sock.sendMessage(from, {
-          text: `
-🔥 THEBOYS BOT
+      if (!text) return
 
-👤 .perfil
-⛏ .minerar
-🎮 .adivinha
-🎰 .cassino
-📊 .ranking
-`
-        })
-      }
-
-      // ================= PERFIL =================
-      if (body === '.perfil') {
-        const u = user.getUser(from) || { gold: 0, xp: 0, level: 1 }
-
-        await sock.sendMessage(from, {
-          text: `
-👤 PERFIL
-
-💰 Gold: ${u.gold}
-⭐ XP: ${u.xp}
-📊 Level: ${u.level}
-`
-        })
-      }
-
-      // ================= MINERAR =================
-      if (body === '.minerar') {
-        const gain = Math.floor(Math.random() * 50) + 1
-        db.addGold(from, gain)
-
-        await sock.sendMessage(from, {
-          text: `⛏ Você minerou +${gain} gold!`
+      if (text === "ping") {
+        await sock.sendMessage(msg.key.remoteJid, {
+          text: "pong 🏓"
         })
       }
     })
 
-    console.log('🚀 Bot iniciado com sucesso')
-
-    // keep alive log (Render não dorme lógica)
-    setInterval(() => {
-      console.log('💓 bot alive')
-    }, 60000)
-
+    return sock
   } catch (err) {
-    console.log('❌ Erro no bot:', err)
+    console.log("🔥 Erro no bot:", err)
 
-    if (!isReconnecting) {
-      isReconnecting = true
-
-      setTimeout(() => {
-        isReconnecting = false
-        startBot()
-      }, 30000)
-    }
+    setTimeout(() => {
+      startBot()
+    }, 5000)
   }
 }
 
-// ===================== START =====================
+/* ================= START ================= */
+
 startBot()
+
+/* ================= PROTEÇÃO ================= */
+
+process.on("uncaughtException", (err) => {
+  console.log("⚠️ uncaughtException:", err)
+})
+
+process.on("unhandledRejection", (err) => {
+  console.log("⚠️ unhandledRejection:", err)
+})
+
+process.on("SIGTERM", () => {
+  console.log("⚠️ SIGTERM recebido, mantendo processo vivo")
+})
+
+process.on("SIGINT", () => {
+  console.log("⚠️ SIGINT recebido")
+})
