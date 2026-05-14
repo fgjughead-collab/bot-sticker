@@ -1,6 +1,4 @@
-// =====================
-// IMPORTS
-// =====================
+// ===================== IMPORTS =====================
 const express = require('express')
 const app = express()
 
@@ -13,13 +11,12 @@ const {
 
 const pino = require('pino')
 
+// libs locais
 const config = require('./config')
 const db = require('./lib/db')
 const user = require('./lib/user')
 
-// =====================
-// EXPRESS (RENDER FIX)
-// =====================
+// ===================== EXPRESS (RENDER FIX) =====================
 app.get('/', (req, res) => {
   res.send('TheBoys Bot online 🚀')
 })
@@ -28,9 +25,10 @@ app.listen(process.env.PORT || 3000, () => {
   console.log('🌐 Server rodando na porta', process.env.PORT || 3000)
 })
 
-// =====================
-// BOT START
-// =====================
+// ===================== CONTROLADORES =====================
+let isReconnecting = false
+
+// ===================== BOT START =====================
 async function startBot() {
   try {
     const { state, saveCreds } = await useMultiFileAuthState('./auth')
@@ -60,34 +58,38 @@ async function startBot() {
 
         console.log('❌ Conexão fechou:', statusCode)
 
-        // ❌ sessão perdida (logout real)
+        // se logout real
         if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
           console.log('🚫 Sessão expirada — precisa novo QR')
           return
         }
 
-        // 🔁 reconnect controlado (evita loop crash)
-        console.log('🔁 Reconectando em 10s...')
+        // evita loop infinito
+        if (isReconnecting) return
+        isReconnecting = true
+
+        console.log('🔁 Reconectando em 30s...')
+
         setTimeout(() => {
+          isReconnecting = false
           startBot()
-        }, 10000)
+        }, 30000)
       }
     })
 
-    // mensagens
+    // ===================== MENSAGENS =====================
     sock.ev.on('messages.upsert', async ({ messages }) => {
       const msg = messages[0]
       if (!msg.message) return
 
       const from = msg.key.remoteJid
+
       const body =
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
         ''
 
-      // =====================
-      // MENU
-      // =====================
+      // ================= MENU =================
       if (body === '.menu') {
         await sock.sendMessage(from, {
           text: `
@@ -102,9 +104,7 @@ async function startBot() {
         })
       }
 
-      // =====================
-      // PERFIL
-      // =====================
+      // ================= PERFIL =================
       if (body === '.perfil') {
         const u = user.getUser(from) || { gold: 0, xp: 0, level: 1 }
 
@@ -119,9 +119,7 @@ async function startBot() {
         })
       }
 
-      // =====================
-      // MINERAR
-      // =====================
+      // ================= MINERAR =================
       if (body === '.minerar') {
         const gain = Math.floor(Math.random() * 50) + 1
         db.addGold(from, gain)
@@ -134,15 +132,24 @@ async function startBot() {
 
     console.log('🚀 Bot iniciado com sucesso')
 
+    // keep alive log (Render não dorme lógica)
+    setInterval(() => {
+      console.log('💓 bot alive')
+    }, 60000)
+
   } catch (err) {
     console.log('❌ Erro no bot:', err)
 
-    // retry seguro
-    setTimeout(startBot, 10000)
+    if (!isReconnecting) {
+      isReconnecting = true
+
+      setTimeout(() => {
+        isReconnecting = false
+        startBot()
+      }, 30000)
+    }
   }
 }
 
-// =====================
-// START
-// =====================
+// ===================== START =====================
 startBot()
