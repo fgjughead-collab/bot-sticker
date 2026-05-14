@@ -1,138 +1,82 @@
-const express = require("express")
-const {
-  default: makeWASocket,
+import makeWASocket, {
+  DisconnectReason,
   useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  DisconnectReason
-} = require("@whiskeysockets/baileys")
+  fetchLatestBaileysVersion
+} from "@whiskeysockets/baileys"
+
+import pino from "pino"
+import express from "express"
 
 const app = express()
-
 const PORT = process.env.PORT || 8080
 
 app.get("/", (req, res) => {
-  res.send("💓 bot alive")
+  res.send("Bot online")
 })
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, () => {
   console.log(`🌐 Server rodando na porta ${PORT}`)
 })
 
-let sock = null
-let reconnecting = false
-
 async function startBot() {
-  try {
-    const { state, saveCreds } = await useMultiFileAuthState("./auth")
+  const { state, saveCreds } = await useMultiFileAuthState("./auth_info")
 
-    const { version } = await fetchLatestBaileysVersion()
+  const { version } = await fetchLatestBaileysVersion()
 
-    sock = makeWASocket({
-      version,
-      auth: state,
-      printQRInTerminal: false,
-      browser: ["TheBoys", "Chrome", "1.0.0"]
-    })
+  const sock = makeWASocket({
+    version,
+    logger: pino({ level: "silent" }),
+    auth: state,
+    browser: ["Ubuntu", "Chrome", "20.0.04"]
+  })
 
-    sock.ev.on("creds.update", saveCreds)
+  sock.ev.on("creds.update", saveCreds)
 
-    // =========================
-    // CÓDIGO DE ASSOCIAÇÃO
-    // =========================
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect, qr } = update
 
-    if (!sock.authState.creds.registered) {
-
-      const numero = "244942147501"
-      // troque pelo seu número
-      // sem + sem espaço
-
-      const code = await sock.requestPairingCode(numero)
-
-      console.log(`
-╔══════════════════════╗
-   CÓDIGO WHATSAPP
-╚══════════════════════╝
-
-${code}
-
-`)
+    if (qr) {
+      console.log("📌 Escaneie o QR Code no Railway logs")
+      console.log(qr)
     }
 
-    sock.ev.on("connection.update", async (update) => {
-      const { connection, lastDisconnect } = update
+    if (connection === "open") {
+      console.log("✅ BOT CONECTADO COM SUCESSO")
+    }
 
-      if (connection === "open") {
-        console.log("🚀 Bot iniciado com sucesso")
-        reconnecting = false
+    if (connection === "close") {
+      const shouldReconnect =
+        lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
+
+      console.log("❌ conexão fechada")
+
+      if (shouldReconnect) {
+        console.log("🔄 reconectando...")
+        startBot()
       }
+    }
+  })
 
-      if (connection === "close") {
-        const statusCode =
-          lastDisconnect?.error?.output?.statusCode
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    const msg = messages[0]
 
-        console.log("❌ Conexão fechou:", statusCode)
+    if (!msg.message) return
 
-        if (statusCode === DisconnectReason.loggedOut) {
-          console.log("⚠️ Sessão desconectada")
-          return
-        }
+    const from = msg.key.remoteJid
 
-        if (reconnecting) return
+    const text =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text ||
+      ""
 
-        reconnecting = true
+    console.log("📩 Mensagem:", text)
 
-        try {
-          sock.ws.close()
-        } catch {}
-
-        console.log("🔁 Reconectando em 10s...")
-
-        setTimeout(() => {
-          startBot()
-        }, 10000)
-      }
-    })
-
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-      const msg = messages[0]
-
-      if (!msg.message) return
-
-      const from = msg.key.remoteJid
-
-      const text =
-        msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        ""
-
-      if (text.toLowerCase() === "ping") {
-        await sock.sendMessage(from, {
-          text: "pong 🏓"
-        })
-      }
-    })
-
-  } catch (err) {
-    console.log("🔥 Erro geral:", err)
-
-    reconnecting = false
-
-    setTimeout(() => {
-      startBot()
-    }, 10000)
-  }
+    if (text.toLowerCase() === "ping") {
+      await sock.sendMessage(from, {
+        text: "pong 🏓"
+      })
+    }
+  })
 }
 
 startBot()
-
-setInterval(() => {
-  console.log("💓 bot alive")
-}, 60000)
-
-process.on("uncaughtException", (err) => {
-  console.log("⚠️ uncaughtException:", err)
-})
-
-process.on("unhandledRejection", (err) => {
-  console.log("⚠️ unhandledRejection:", err)
-})
