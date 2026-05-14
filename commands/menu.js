@@ -10,18 +10,29 @@ await sock.sendMessage(from, {
 text: `
 ╭━━🔥 THEBOYS BOT 🔥━━╮
 
-👤 .perfil
-⛏ .minerar
-🎮 .cassino
-📊 .ranking
-🏪 .shop
+👤 PERFIL
+.perfil
+.gold
+.daily
+.ranking
+
+🎮 GAMES
+.minerar
+.cassino
+.adivinha
 
 📥 DOWNLOADS
-🎵 .mp3 link
-🎥 .mp4 link
-🎬 .tiktok link
+.mp3 link
+.mp4 link
+.tiktok link
+.facebook link
+.instagram link
 
-👑 .menuadm
+🛠 UTIL
+.ping
+
+👑 ADMIN
+.menuadm
 
 ╰━━━━━━━━━━━━━━╯
 `
