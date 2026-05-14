@@ -1,48 +1,95 @@
 const express = require("express")
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys")
-
-/* ================= EXPRESS SERVER ================= */
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  DisconnectReason
+} = require("@whiskeysockets/baileys")
 
 const app = express()
-const PORT = process.env.PORT || 3000
+
+const PORT = process.env.PORT || 8080
 
 app.get("/", (req, res) => {
   res.send("💓 bot alive")
 })
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("🌐 Server rodando na porta", PORT)
+  console.log(`🌐 Server rodando na porta ${PORT}`)
 })
 
-/* ================= BOT ================= */
+let sock = null
+let reconnecting = false
 
 async function startBot() {
   try {
     const { state, saveCreds } = await useMultiFileAuthState("./auth")
+
     const { version } = await fetchLatestBaileysVersion()
 
-    const sock = makeWASocket({
+    sock = makeWASocket({
       version,
       auth: state,
-      printQRInTerminal: true
+      printQRInTerminal: false,
+      browser: ["TheBoys", "Chrome", "1.0.0"]
     })
 
     sock.ev.on("creds.update", saveCreds)
 
-    sock.ev.on("connection.update", (update) => {
+    // =========================
+    // CÓDIGO DE ASSOCIAÇÃO
+    // =========================
+
+    if (!sock.authState.creds.registered) {
+
+      const numero = "5511999999999"
+      // troque pelo seu número
+      // sem + sem espaço
+
+      const code = await sock.requestPairingCode(numero)
+
+      console.log(`
+╔══════════════════════╗
+   CÓDIGO WHATSAPP
+╚══════════════════════╝
+
+${code}
+
+`)
+    }
+
+    sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect } = update
 
       if (connection === "open") {
         console.log("🚀 Bot iniciado com sucesso")
+        reconnecting = false
       }
 
       if (connection === "close") {
-        console.log("❌ Conexão fechou:", lastDisconnect?.error?.message)
+        const statusCode =
+          lastDisconnect?.error?.output?.statusCode
 
-        console.log("🔁 Reconectando...")
+        console.log("❌ Conexão fechou:", statusCode)
+
+        if (statusCode === DisconnectReason.loggedOut) {
+          console.log("⚠️ Sessão desconectada")
+          return
+        }
+
+        if (reconnecting) return
+
+        reconnecting = true
+
+        try {
+          sock.ws.close()
+        } catch {}
+
+        console.log("🔁 Reconectando em 10s...")
+
         setTimeout(() => {
           startBot()
-        }, 5000)
+        }, 10000)
       }
     })
 
@@ -51,34 +98,36 @@ async function startBot() {
 
       if (!msg.message) return
 
+      const from = msg.key.remoteJid
+
       const text =
         msg.message.conversation ||
-        msg.message.extendedTextMessage?.text
+        msg.message.extendedTextMessage?.text ||
+        ""
 
-      if (!text) return
-
-      if (text === "ping") {
-        await sock.sendMessage(msg.key.remoteJid, {
+      if (text.toLowerCase() === "ping") {
+        await sock.sendMessage(from, {
           text: "pong 🏓"
         })
       }
     })
 
-    return sock
   } catch (err) {
-    console.log("🔥 Erro no bot:", err)
+    console.log("🔥 Erro geral:", err)
+
+    reconnecting = false
 
     setTimeout(() => {
       startBot()
-    }, 5000)
+    }, 10000)
   }
 }
 
-/* ================= START ================= */
-
 startBot()
 
-/* ================= PROTEÇÃO ================= */
+setInterval(() => {
+  console.log("💓 bot alive")
+}, 60000)
 
 process.on("uncaughtException", (err) => {
   console.log("⚠️ uncaughtException:", err)
@@ -86,12 +135,4 @@ process.on("uncaughtException", (err) => {
 
 process.on("unhandledRejection", (err) => {
   console.log("⚠️ unhandledRejection:", err)
-})
-
-process.on("SIGTERM", () => {
-  console.log("⚠️ SIGTERM recebido, mantendo processo vivo")
-})
-
-process.on("SIGINT", () => {
-  console.log("⚠️ SIGINT recebido")
 })
