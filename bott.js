@@ -1,3 +1,11 @@
+process.on('uncaughtException', (err) => {
+console.log('Erro capturado:', err)
+})
+
+process.on('unhandledRejection', (err) => {
+console.log('Promise error:', err)
+})
+
 const {
 default: makeWASocket,
 useMultiFileAuthState,
