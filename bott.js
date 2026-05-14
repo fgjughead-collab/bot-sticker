@@ -1,69 +1,73 @@
 import makeWASocket, {
   useMultiFileAuthState,
+  fetchLatestBaileysVersion,
   DisconnectReason
 } from '@whiskeysockets/baileys'
 
-import pino from 'pino'
+import P from 'pino'
 
-let pairingInProgress = false
+const logger = P({ level: 'silent' })
 
-const startBot = async () => {
-  const { state, saveCreds } = await useMultiFileAuthState('./session')
+const PHONE_NUMBER = '5511999999999' // 🔥 TROCA AQUI
 
-  const sock = makeWASocket({
+let sock = null
+let reconnecting = false
+
+async function startBot() {
+  const { state, saveCreds } = await useMultiFileAuthState('./auth')
+  const { version } = await fetchLatestBaileysVersion()
+
+  sock = makeWASocket({
+    version,
     auth: state,
-    logger: pino({ level: 'silent' }),
+    logger,
     printQRInTerminal: false
   })
 
+  // salva sessão
   sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update
 
     if (connection === 'open') {
-      console.log('✅ Conectado com sucesso!')
-      pairingInProgress = false
+      console.log('✅ Conectado com sucesso')
+
+      // 🔥 pairing code SÓ AQUI
+      try {
+        if (!sock.authState.creds.registered) {
+          const code = await sock.requestPairingCode(PHONE_NUMBER)
+          console.log('\n══════════════════════')
+          console.log('📌 SEU CÓDIGO WHATSAPP:')
+          console.log(code)
+          console.log('══════════════════════\n')
+        }
+      } catch (err) {
+        console.log('❌ erro ao gerar pairing code:', err.message)
+      }
     }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode
 
-      console.log('❌ conexão fechada:', statusCode)
+      console.log('❌ Conexão fechada:', statusCode)
 
-      // evita crash infinito
-      if (statusCode !== DisconnectReason.loggedOut) {
-        setTimeout(startBot, 5000)
+      // 🔥 evita loop infinito no Railway
+      if (!reconnecting) {
+        reconnecting = true
+        console.log('🔄 tentando reconectar em 5s...')
+        setTimeout(() => {
+          reconnecting = false
+          startBot()
+        }, 5000)
       }
     }
-  })
 
-  // 🔥 PAIRING CODE CONTROLADO (SEM LOOP)
-  if (!sock.authState.creds.registered && !pairingInProgress) {
-    pairingInProgress = true
-
-    const phoneNumber = '5511999999999' // <-- TROCA AQUI
-
-    try {
-      const code = await sock.requestPairingCode(phoneNumber)
-
-      console.log('\n══════════════════════')
-      console.log('🔑 CÓDIGO WHATSAPP:')
-      console.log(code)
-      console.log('══════════════════════\n')
-
-      console.log('⏳ Aguarde o login no WhatsApp...')
-
-      // bloqueia novo código por 2 minutos
-      setTimeout(() => {
-        pairingInProgress = false
-      }, 2 * 60 * 1000)
-
-    } catch (err) {
-      console.log('Erro ao gerar pairing code:', err)
-      pairingInProgress = false
+    if (connection === 'connecting') {
+      console.log('🔄 conectando...')
     }
-  }
+  })
 }
 
+// start inicial
 startBot()
