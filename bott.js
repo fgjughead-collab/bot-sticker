@@ -1,5 +1,5 @@
 // =====================
-// 1. IMPORTS
+// IMPORTS
 // =====================
 const express = require('express')
 const app = express()
@@ -12,14 +12,13 @@ const {
 } = require('@whiskeysockets/baileys')
 
 const pino = require('pino')
-const fs = require('fs')
 
 const config = require('./config')
 const db = require('./lib/db')
 const user = require('./lib/user')
 
 // =====================
-// 2. WEB SERVER (RENDER FIX)
+// EXPRESS (RENDER FIX)
 // =====================
 app.get('/', (req, res) => {
   res.send('TheBoys Bot online 🚀')
@@ -30,7 +29,7 @@ app.listen(process.env.PORT || 3000, () => {
 })
 
 // =====================
-// 3. BOT CORE
+// BOT START
 // =====================
 async function startBot() {
   try {
@@ -41,10 +40,11 @@ async function startBot() {
       version,
       auth: state,
       logger: pino({ level: 'silent' }),
-      printQRInTerminal: true
+      printQRInTerminal: true,
+      browser: ['TheBoys Bot', 'Chrome', '1.0.0']
     })
 
-    // salvar login
+    // salvar sessão
     sock.ev.on('creds.update', saveCreds)
 
     // conexão
@@ -52,7 +52,7 @@ async function startBot() {
       const { connection, lastDisconnect } = update
 
       if (connection === 'open') {
-        console.log('✅ TheBoys Bot ONLINE')
+        console.log('🚀 Bot ONLINE')
       }
 
       if (connection === 'close') {
@@ -60,12 +60,17 @@ async function startBot() {
 
         console.log('❌ Conexão fechou:', statusCode)
 
-        if (statusCode !== DisconnectReason.loggedOut) {
-          console.log('🔁 Reconectando...')
-          setTimeout(startBot, 5000)
-        } else {
-          console.log('🚫 Sessão encerrada. Precisa novo QR.')
+        // ❌ sessão perdida (logout real)
+        if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+          console.log('🚫 Sessão expirada — precisa novo QR')
+          return
         }
+
+        // 🔁 reconnect controlado (evita loop crash)
+        console.log('🔁 Reconectando em 10s...')
+        setTimeout(() => {
+          startBot()
+        }, 10000)
       }
     })
 
@@ -86,11 +91,11 @@ async function startBot() {
       if (body === '.menu') {
         await sock.sendMessage(from, {
           text: `
-🔥 TheBoys Bot
+🔥 THEBOYS BOT
 
 👤 .perfil
 ⛏ .minerar
-🎮 .adivinha 1-5
+🎮 .adivinha
 🎰 .cassino
 📊 .ranking
 `
@@ -131,7 +136,9 @@ async function startBot() {
 
   } catch (err) {
     console.log('❌ Erro no bot:', err)
-    setTimeout(startBot, 5000)
+
+    // retry seguro
+    setTimeout(startBot, 10000)
   }
 }
 
