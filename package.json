@@ -2,12 +2,12 @@
   "name": "bot-sticker",
   "version": "2.0.0",
   "type": "module",
-  "main": "bott.js",
   "scripts": {
-    "start": "node bott.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
-    "pino": "latest"
+    "pino": "latest",
+    "qrcode-terminal": "latest"
   }
 }
