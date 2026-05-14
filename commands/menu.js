@@ -4,17 +4,29 @@ name: 'menu',
 
 async execute(sock, msg) {
 
-await sock.sendMessage(msg.key.remoteJid, {
+const from = msg.key.remoteJid
+
+await sock.sendMessage(from, {
 text: `
-🔥 THEBOYS BOT 🔥
+╭━━🔥 THEBOYS BOT 🔥━━╮
 
 👤 .perfil
 ⛏ .minerar
 🎮 .cassino
 📊 .ranking
 🏪 .shop
+
+📥 DOWNLOADS
+🎵 .mp3 link
+🎥 .mp4 link
+🎬 .tiktok link
+
+👑 .menuadm
+
+╰━━━━━━━━━━━━━━╯
 `
 })
 
 }
+
 }
