@@ -1,23 +1,33 @@
-process.on('uncaughtException', (err) => {
-console.log('Erro capturado:', err)
-})
+process.on('uncaughtException', console.log)
+process.on('unhandledRejection', console.log)
 
-process.on('unhandledRejection', (err) => {
-console.log('Promise error:', err)
-})
-
+/* 📦 IMPORTS */
 const {
 default: makeWASocket,
 useMultiFileAuthState,
 fetchLatestBaileysVersion,
-DisconnectReason,
-downloadContentFromMessage
+DisconnectReason
 } = require('@whiskeysockets/baileys')
 
 const pino = require('pino')
-const fs = require('fs')
-const { exec } = require('child_process')
 
+const config = require('./config')
+
+const eco = require('./lib/economy')
+const games = require('./lib/games')
+const ranking = require('./lib/ranking')
+const downloads = require('./lib/downloads')
+const shop = require('./lib/shop')
+
+const perm = require('./lib/permissions')
+const panel = require('./lib/panel')
+
+const antispam = require('./lib/antispam')
+const cd = require('./lib/cooldown')
+
+const handler = require('./lib/handler')
+
+/* 🚀 START BOT */
 async function startBot() {
 
 const { state, saveCreds } = await useMultiFileAuthState('./auth')
@@ -26,41 +36,12 @@ const { version } = await fetchLatestBaileysVersion()
 const sock = makeWASocket({
 version,
 auth: state,
-logger: pino({ level: 'silent' }),
-printQRInTerminal: false
+logger: pino({ level: 'silent' })
 })
 
 sock.ev.on('creds.update', saveCreds)
 
-sock.ev.on('connection.update', (update) => {
-
-const { connection, lastDisconnect } = update
-
-if (connection === 'open') {
-console.log('✅ CONECTADO COM SUCESSO')
-}
-
-if (connection === 'close') {
-
-const statusCode =
-lastDisconnect?.error?.output?.statusCode
-
-console.log('❌ Conexão fechou:', statusCode)
-
-if (statusCode !== DisconnectReason.loggedOut) {
-
-setTimeout(() => {
-startBot()
-}, 5000)
-
-} else {
-console.log('❌ Deslogado do WhatsApp. Precisa reconectar manualmente.')
-}
-
-}
-
-})
-
+/* 📩 MESSAGES */
 sock.ev.on('messages.upsert', async ({ messages }) => {
 
 const msg = messages[0]
@@ -71,128 +52,320 @@ const from = msg.key.remoteJid
 const body =
 msg.message.conversation ||
 msg.message.extendedTextMessage?.text ||
+msg.message.imageMessage?.caption ||
+msg.message.videoMessage?.caption ||
 ''
 
-/* MENU */
-if (body === '.menu') {
+/* 🧠 ANTI SPAM */
+if (antispam.isSpam(from)) {
+return sock.sendMessage(from, {
+text: "🚫 Devagar! você está enviando mensagens muito rápido."
+})
+}
+
+/* 👤 CRIAR USER AUTOMÁTICO */
+eco.createUser(from)
+
+/* 🚫 BAN CHECK */
+if (perm.isBanned(from)) {
+return sock.sendMessage(from, {
+text: "🚫 Você está banido do TheBoys Bot."
+})
+}
+
+/* 🧩 COMMAND PARSE */
+const parsed = handler.parseCommand(body, config.prefix)
+
+if (!parsed) return
+
+const { cmd, args } = parsed
+
+/* ========================= */
+/* 👑 MENU PRINCIPAL */
+/* ========================= */
+
+if (cmd === 'menu') {
 
 await sock.sendMessage(from, {
-text:
-`╭━━ BOT STICKER ━━╮
-┃ .s → Criar sticker
-╰━━━━━━━━━━━━━━━╯`
-})
+text: `
+╭━━🔥 *THEBOYS BOT* 🔥━━╮
 
+👤 .perfil
+⛏ .minerar
+🎮 .adivinha
+🎰 .cassino
+📊 .ranking
+🏪 .shop
+
+📥 DOWNLOADS
+🎵 .mp3 link
+🎥 .mp4 link
+🎬 .tiktok link
+
+👑 .menuadm
+
+╰━━━━━━━━━━━━━━╯
+`
+})
 }
 
-/* STICKER */
-if (body === '.s') {
+/* ========================= */
+/* 👤 PERFIL */
+/* ========================= */
+
+if (cmd === 'perfil') {
+
+const u = eco.getUser(from)
 
 await sock.sendMessage(from, {
-text: '🫡🤌🏾 Processando sticker...'
+text: `
+👤 PERFIL
+
+💰 Gold: ${u.gold}
+⭐ XP: ${u.xp}
+📊 Level: ${u.level}
+`
 })
-
-let media = null
-let mediaType = null
-
-if (msg.message.imageMessage) {
-media = msg.message.imageMessage
-mediaType = 'image'
 }
 
-else if (msg.message.videoMessage) {
+/* ========================= */
+/* ⛏ MINERAR (COOLDOWN) */
+/* ========================= */
 
-const seconds = msg.message.videoMessage.seconds || 0
+if (cmd === 'minerar') {
 
-if (seconds > 15) {
+if (cd.check(from, 'minerar', 60000)) {
 return sock.sendMessage(from, {
-text: '❌ O vídeo deve ter no máximo 15 segundos.'
+text: "⏳ Aguarde 1 minuto para minerar novamente."
 })
 }
 
-media = msg.message.videoMessage
-mediaType = 'video'
-}
-
-else if (msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage) {
-
-media =
-msg.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage
-
-mediaType = 'image'
-}
-
-else if (msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.videoMessage) {
-
-const quotedVideo =
-msg.message.extendedTextMessage.contextInfo.quotedMessage.videoMessage
-
-const seconds = quotedVideo.seconds || 0
-
-if (seconds > 15) {
-return sock.sendMessage(from, {
-text: '❌ O vídeo deve ter no máximo 15 segundos.'
-})
-}
-
-media = quotedVideo
-mediaType = 'video'
-}
-
-if (!media) {
-return sock.sendMessage(from, {
-text: '❌ Envie ou responda uma imagem/vídeo com .s'
-})
-}
-
-let stream
-
-try {
-stream = await downloadContentFromMessage(media, mediaType)
-} catch (e) {
-return sock.sendMessage(from, {
-text: '❌ Erro ao baixar mídia.'
-})
-}
-
-let buffer = Buffer.from([])
-
-for await (const chunk of stream) {
-buffer = Buffer.concat([buffer, chunk])
-}
-
-const inputFile =
-mediaType === 'image'
-? './input.jpg'
-: './input.mp4'
-
-fs.writeFileSync(inputFile, buffer)
-
-const command =
-mediaType === 'image'
-? `ffmpeg -i input.jpg -vcodec libwebp output.webp`
-: `ffmpeg -i input.mp4 -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15,pad=512:512:-1:-1:color=white@0.0" -loop 0 -ss 00:00:00 -t 00:00:15 -preset default -an -vsync 0 output.webp`
-
-exec(command, async (err) => {
-
-if (err) {
-console.log(err)
-return sock.sendMessage(from, {
-text: '❌ Erro ao criar sticker.'
-})
-}
-
-const sticker = fs.readFileSync('./output.webp')
+const gain = Math.floor(Math.random() * 50) + 10
+eco.addGold(from, gain)
 
 await sock.sendMessage(from, {
-sticker
+text: `⛏ Você minerou +${gain} gold!`
+})
+}
+
+/* ========================= */
+/* 🎮 ADIVINHA */
+/* ========================= */
+
+if (cmd === 'adivinha') {
+
+const res = games.adivinha(from, args[0])
+
+await sock.sendMessage(from, { text: res })
+}
+
+/* ========================= */
+/* 🎰 CASSINO */
+/* ========================= */
+
+if (cmd === 'cassino') {
+
+const res = games.cassino(from)
+
+await sock.sendMessage(from, { text: res })
+}
+
+/* ========================= */
+/* 📊 RANKING */
+/* ========================= */
+
+if (cmd === 'ranking') {
+
+const top = ranking.getRanking()
+
+let text = "📊 TOP PLAYERS\n\n"
+
+top.forEach((u, i) => {
+text += `${i + 1}. ${u[0].split('@')[0]} - ${u[1].gold}💰\n`
 })
 
-fs.unlinkSync(inputFile)
-fs.unlinkSync('./output.webp')
+await sock.sendMessage(from, { text })
+}
+
+/* ========================= */
+/* 🏪 SHOP */
+/* ========================= */
+
+if (cmd === 'shop') {
+
+const items = shop.shopList()
+
+let text = "🏪 LOJA\n\n"
+
+for (let i in items) {
+text += `🛒 ${i} - ${items[i]} gold\n`
+}
+
+await sock.sendMessage(from, { text })
+}
+
+/* ========================= */
+/* 🛒 BUY */
+/* ========================= */
+
+if (cmd === 'buy') {
+
+const res = shop.buy(from, args[0])
+
+await sock.sendMessage(from, { text: res })
+}
+
+/* ========================= */
+/* 🎵 YOUTUBE MP3 */
+/* ========================= */
+
+if (cmd === 'mp3') {
+
+const url = args[0]
+
+await sock.sendMessage(from, { text: "⏳ Baixando áudio..." })
+
+const data = await downloads.ytMP3(url)
+
+if (!data?.url) {
+return sock.sendMessage(from, { text: "❌ Erro no download" })
+}
+
+await sock.sendMessage(from, {
+audio: { url: data.url },
+mimetype: 'audio/mp4'
+})
+}
+
+/* ========================= */
+/* 🎥 YOUTUBE MP4 */
+/* ========================= */
+
+if (cmd === 'mp4') {
+
+const url = args[0]
+
+await sock.sendMessage(from, { text: "⏳ Baixando vídeo..." })
+
+const data = await downloads.ytMP4(url)
+
+if (!data?.url) {
+return sock.sendMessage(from, { text: "❌ Erro no vídeo" })
+}
+
+await sock.sendMessage(from, {
+video: { url: data.url }
+})
+}
+
+/* ========================= */
+/* 🎬 TIKTOK */
+/* ========================= */
+
+if (cmd === 'tiktok') {
+
+const url = args[0]
+
+const data = await downloads.tiktok(url)
+
+if (!data?.video) {
+return sock.sendMessage(from, { text: "❌ Erro no TikTok" })
+}
+
+await sock.sendMessage(from, {
+video: { url: data.video }
+})
+}
+
+/* ========================= */
+/* 👑 PAINEL ADMIN */
+/* ========================= */
+
+if (cmd === 'menuadm') {
+
+if (!perm.isAdminBot(from)) return
+
+await sock.sendMessage(from, {
+text: `
+👑 PAINEL ADMIN
+
+.addvip
+.removevip
+.addadmin
+.removeadmin
+.ban
+.unban
+.addgold
+.reset
+.status
+`
+})
+}
+
+/* ========================= */
+/* 🚫 BAN */
+/* ========================= */
+
+if (cmd === 'ban') {
+
+if (!perm.isAdminBot(from)) return
+
+panel.ban(args[0])
+
+await sock.sendMessage(from, {
+text: "🚫 Usuário banido"
+})
+}
+
+/* ========================= */
+/* 💎 VIP */
+/* ========================= */
+
+if (cmd === 'addvip') {
+
+if (!perm.isAdminBot(from)) return
+
+panel.addVIP(args[0])
+
+await sock.sendMessage(from, {
+text: "💎 VIP adicionado"
+})
+}
+
+/* ========================= */
+/* 💰 ADD GOLD */
+/* ========================= */
+
+if (cmd === 'addgold') {
+
+if (!perm.isAdminBot(from)) return
+
+panel.addGold(args[0], parseInt(args[1]))
+
+await sock.sendMessage(from, {
+text: "💰 Gold enviado"
+})
+}
 
 })
 
+/* 🔌 CONNECTION */
+sock.ev.on('connection.update', (update) => {
+
+const { connection, lastDisconnect } = update
+
+if (connection === 'open') {
+console.log("🔥 TheBoys Bot ONLINE 🚀")
+}
+
+if (connection === 'close') {
+
+const status = lastDisconnect?.error?.output?.statusCode
+
+if (status !== DisconnectReason.loggedOut) {
+startBot()
+}
+}
 })
 
 }
