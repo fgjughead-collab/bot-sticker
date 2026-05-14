@@ -1,154 +1,96 @@
-const {
-default: makeWASocket,
-useMultiFileAuthState,
-DisconnectReason,
-fetchLatestBaileysVersion,
-downloadContentFromMessage
-} = require('@whiskeysockets/baileys')
+import makeWASocket, {
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  DisconnectReason
+} from "@whiskeysockets/baileys";
 
-const pino = require('pino')
-const fs = require('fs')
-const { exec } = require('child_process')
-const QRCode = require('qrcode-terminal')
+import pino from "pino";
+
+const PHONE_NUMBER = "244942147501";
+
+let reconnectAttempts = 0;
+const MAX_RECONNECT = 5;
 
 async function startBot() {
+  const { state, saveCreds } = await useMultiFileAuthState("./auth");
+  const { version } = await fetchLatestBaileysVersion();
 
-const { state, saveCreds } = await useMultiFileAuthState('./auth')
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    logger: pino({ level: "silent" }),
+    printQRInTerminal: false
+  });
 
-const { version } = await fetchLatestBaileysVersion()
+  sock.ev.on("creds.update", saveCreds);
 
-const sock = makeWASocket({
-version,
-logger: pino({ level: 'silent' }),
-auth: state
-})
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect } = update;
 
-sock.ev.on('creds.update', saveCreds)
-
-sock.ev.on('connection.update', (update) => {
-    const { connection, qr, lastDisconnect } = update
-
-    // 🔥 MOSTRA QR SEM RESETAR
-    if (qr) {
-        console.log("\n📱 ESCANEIE O QR ABAIXO:\n")
-        require('qrcode-terminal').generate(qr, { small: true })
+    if (connection === "connecting") {
+      console.log("🔄 conectando...");
     }
 
-    // 🔥 CONECTADO
-    if (connection === 'open') {
-        console.log("✅ BOT CONECTADO COM SUCESSO")
-    }
+    if (connection === "open") {
+      console.log("✅ BOT ONLINE");
 
-    // 🔥 SÓ RECONECTA SE CAIR DE VERDADE
-    if (connection === 'close') {
-        const shouldReconnect =
-            lastDisconnect?.error?.output?.statusCode !== 401
+      reconnectAttempts = 0;
 
-        console.log("⚠️ Conexão fechada. Reconnect:", shouldReconnect)
+      // só gera código se NÃO estiver logado ainda
+      if (!sock.authState.creds.registered) {
+        try {
+          await new Promise(r => setTimeout(r, 10000)); // 👈 delay forte evita expiração
 
-        if (shouldReconnect) {
-            setTimeout(() => {
-                startBot()
-            }, 5000) // espera 5s antes de reiniciar (evita QR reset rápido)
+          const code = await sock.requestPairingCode(PHONE_NUMBER);
+
+          console.log("\n📌 CÓDIGO WHATSAPP:", code, "\n");
+        } catch (e) {
+          console.log("Erro pairing:", e.message);
         }
+      }
     }
-})
 
-const { connection, qr, lastDisconnect } = update
+    if (connection === "close") {
+      const reason = lastDisconnect?.error?.output?.statusCode;
 
-if (qr) {
-QRCode.generate(qr, { small: true })
+      console.log("❌ conexão fechou:", reason);
+
+      // evita loop infinito de restart
+      if (reconnectAttempts >= MAX_RECONNECT) {
+        console.log("⛔ muitas tentativas, parando bot.");
+        return;
+      }
+
+      reconnectAttempts++;
+
+      const delay = 5000 * reconnectAttempts;
+
+      console.log(`🔄 reconectando em ${delay / 1000}s...`);
+
+      setTimeout(startBot, delay);
+    }
+  });
+
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg.message) return;
+
+    const text =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text;
+
+    if (!text) return;
+
+    const from = msg.key.remoteJid;
+
+    if (text === "!ping") {
+      await sock.sendMessage(from, { text: "pong 🟢" });
+    }
+
+    if (text === "!oi") {
+      await sock.sendMessage(from, { text: "oi 😎" });
+    }
+  });
 }
 
-if (connection === 'close') {
-
-const shouldReconnect =
-lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
-
-if (shouldReconnect) {
-startBot()
-}
-
-} else if (connection === 'open') {
-console.log('BOT CONECTADO')
-}
-})
-
-sock.ev.on('messages.upsert', async ({ messages }) => {
-
-const msg = messages[0]
-
-if (!msg.message) return
-
-const from = msg.key.remoteJid
-
-const body =
-msg.message.conversation ||
-msg.message.extendedTextMessage?.text ||
-''
-
-const isImage = msg.message.imageMessage
-
-const isQuotedImage =
-msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage
-
-if (body === '.menu') {
-
-await sock.sendMessage(from, {
-text:
-`╭━━ BOT STICKER ━━╮
-┃ .s → Criar figurinha
-╰━━━━━━━━━━━━━━━╯`
-})
-
-}
-
-if (body === '.s') {
-
-let media
-
-if (isImage) {
-media = msg.message.imageMessage
-} else if (isQuotedImage) {
-media =
-msg.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage
-} else {
-return sock.sendMessage(from, {
-text: 'Envie ou responda uma imagem com .s'
-})
-}
-
-const stream = await downloadContentFromMessage(media, 'image')
-
-let buffer = Buffer.from([])
-
-for await (const chunk of stream) {
-buffer = Buffer.concat([buffer, chunk])
-}
-
-fs.writeFileSync('./input.jpg', buffer)
-
-exec(
-`ffmpeg -i input.jpg -vcodec libwebp -filter:v "scale=512:512:force_original_aspect_ratio=decrease,fps=15,pad=512:512:-1:-1:color=white" output.webp`,
-async (err) => {
-
-if (err) {
-console.log(err)
-return
-}
-
-const sticker = fs.readFileSync('./output.webp')
-
-await sock.sendMessage(from, {
-sticker
-})
-
-fs.unlinkSync('./input.jpg')
-fs.unlinkSync('./output.webp')
-}
-)
-}
-})
-}
-
-startBot()
+startBot();
