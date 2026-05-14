@@ -1,5 +1,5 @@
 module.exports = {
 botName: "TheBoys Bot",
-owner: "SEU_NUMERO_AQUI", // exemplo: 5511999999999
+owner: "244950525371",
 prefix: "."
 }
