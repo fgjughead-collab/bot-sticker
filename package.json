@@ -1,21 +1,18 @@
 {
-  "name": "bot-sticker",
-  "version": "1.0.0",
-  "description": "TheBoys Bot",
+  "name": "theboys-bot",
+  "version": "2.0.0",
   "main": "bott.js",
   "scripts": {
     "start": "node bott.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "type": "commonjs",
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc11",
+    "axios": "^1.11.0",
+    "better-sqlite3": "^11.7.0",
     "file-type": "^22.0.1",
     "fs-extra": "^11.3.5",
     "pino": "^10.3.1",
-    "qrcode-terminal": "^0.12.0",
-    "sqlite3": "^5.1.7"
+    "qrcode-terminal": "^0.12.0"
   }
 }
